@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  dns-updater:
+    build: .
+    container_name: cloudflare-dns-updater
+    restart: unless-stopped
+    volumes:
+      # Mount config file (edit this on host)
+      - ./config.yaml:/app/config.yaml:ro
+      
+      # Mount logs to host for persistence
+      - ./logs:/var/log
+    environment:
+      # Optional: Override config file location
+      # - DNS_UPDATER_CONFIG=/app/config.yaml
+      
+      # Set timezone (optional)
+      - TZ=Asia/Seoul
+    
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M

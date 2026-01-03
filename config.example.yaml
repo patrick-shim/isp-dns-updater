@@ -1,0 +1,59 @@
+# CloudFlare DNS Updater Configuration Example
+# Copy this file to config.yaml and update with your values
+
+cloudflare:
+  # Your CloudFlare Zone ID (found in CloudFlare dashboard)
+  zone_id: "your_zone_id_here"
+  
+  # Your CloudFlare API Token (with DNS edit permissions)
+  api_token: "your_api_token_here"
+  
+  # CloudFlare API base URL (usually no need to change)
+  api_base_url: "https://api.cloudflare.com/client/v4"
+
+dns:
+  # The DNS record name to update
+  record_name: "unifi.example.com"
+  
+  # Hostnames to resolve for ISP IPs
+  isp1_hostname: "isp1.example.com"
+  isp2_hostname: "isp2.example.com"
+  
+  # DNS record TTL in seconds
+  ttl: 120
+  
+  # Whether to proxy through CloudFlare
+  proxied: false
+
+retry:
+  # Maximum number of retry attempts for failed operations
+  max_retries: 3
+  
+  # Initial delay in seconds before first retry
+  initial_delay: 1.0
+  
+  # Multiplier for exponential backoff (delay *= backoff_factor)
+  backoff_factor: 2.0
+  
+  # Initial delay for DNS resolution retries
+  dns_initial_delay: 2.0
+
+timeouts:
+  # Timeout in seconds for CloudFlare API requests
+  api_timeout: 30
+  
+  # Timeout in seconds for DNS resolution
+  dns_timeout: 10
+
+logging:
+  # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  
+  # Path to log file (set to null or empty string to disable file logging)
+  log_file: "/var/log/dns-updater.log"
+  
+  # Log message format
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  # Date format for log messages
+  date_format: "%Y-%m-%d %H:%M:%S"
