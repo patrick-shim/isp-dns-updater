@@ -18,6 +18,13 @@ services:
       # Set timezone (optional)
       - TZ=Asia/Seoul
     
+    # Log rotation (keeps ~30 days of logs, max 1GB total)
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    
     # Resource limits (optional)
     deploy:
       resources:
