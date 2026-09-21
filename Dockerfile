@@ -1,10 +1,14 @@
-FROM python:3.12-slim
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 # Install system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+    ca-certificates \
     dnsutils \
-    cron \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -16,24 +20,15 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
-COPY update_dns.py .
-COPY config.yaml .
+RUN groupadd --system --gid 10001 dns-updater && \
+    useradd --system --uid 10001 --gid dns-updater --no-create-home dns-updater
 
-# Create log directory
-RUN mkdir -p /var/log && \
-    touch /var/log/dns-updater.log && \
-    chmod 666 /var/log/dns-updater.log
+# Runtime configuration and secrets are mounted by Docker Compose, never copied.
+COPY --chown=dns-updater:dns-updater update_dns.py /app/update_dns.py
+COPY --chown=dns-updater:dns-updater docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0555 /usr/local/bin/docker-entrypoint.sh /app/update_dns.py
 
-# Create cron job file
-RUN echo "* * * * * cd /app && /usr/local/bin/python /app/update_dns.py >> /var/log/cron.log 2>&1" > /etc/cron.d/dns-updater && \
-    chmod 0644 /etc/cron.d/dns-updater && \
-    crontab /etc/cron.d/dns-updater && \
-    touch /var/log/cron.log
-
-# Create entrypoint script
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+USER dns-updater
 
 # Set entrypoint
-ENTRYPOINT ["/docker-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

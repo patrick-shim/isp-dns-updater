@@ -1,125 +1,81 @@
-# Security Policy
+# Security policy
 
-## Protecting Your Credentials
+## Credential model
 
-This application requires sensitive CloudFlare API credentials. Please follow these security best practices:
+The Docker deployment reads Cloudflare credentials from these host files:
 
-### 1. Never Commit Credentials
-
-**IMPORTANT**: The `config.yaml` file contains your CloudFlare API token and Zone ID. This file is already excluded in `.gitignore` to prevent accidental commits.
-
-Before pushing to GitHub:
-```bash
-# Verify config.yaml is not tracked
-git status
-
-# If it appears, ensure .gitignore is working
-git check-ignore config.yaml
+```text
+secrets/cloudflare_zone_id
+secrets/cloudflare_api_token
 ```
 
-### 2. Use Restricted API Tokens
+Docker Compose grants only the `dns-updater` service access and mounts them at
+`/run/secrets`. The application reads them through the `zone_id_file` and
+`api_token_file` settings. Neither value is copied into the image.
 
-When creating your CloudFlare API token:
-- Use the **"Edit zone DNS"** template (not Global API Key)
-- Limit permissions to **DNS:Edit** only
-- Restrict to specific zones
-- Set IP address restrictions if possible
-- Use token expiration dates
+Compose file-backed secrets protect credentials from source control and from
+being embedded in image layers or ordinary environment variables. They are not
+an encrypted secret vault: the host files still require OS permissions, disk
+protection, backups with suitable access controls, and trusted VM admins.
 
-### 3. File Permissions
+## Required practices
 
-Protect your configuration file on the host system:
-```bash
-chmod 600 config.yaml
-```
+- Use a scoped Cloudflare API token, never the Global API Key.
+- Grant only **Zone → DNS → Edit** and only for the intended zone.
+- Store only one value in each secret file and set the directory to mode `700`
+  and files to `600`.
+- Keep `config.yaml`, `.env`, and `secrets/` ignored. Check before every push:
 
-### 4. Docker Security
+  ```bash
+  git check-ignore -v config.yaml secrets/cloudflare_api_token
+  git status --short
+  git diff --cached
+  ```
 
-When using Docker:
-- Configuration is mounted as **read-only** in the container
-- Logs may contain IP addresses - secure the `./logs` directory
-- Use Docker secrets for production deployments (see below)
+- Do not paste tokens into issue reports, logs, screenshots, shell scripts, or
+  Compose environment fields.
+- Restrict SSH and Proxmox access, enable VM backups, and keep Ubuntu and Docker
+  patched.
 
-### 5. Production Deployment with Docker Secrets
+The Zone ID is an identifier rather than an authentication secret, but this
+deployment stores it beside the token to keep all Cloudflare-specific values out
+of the repository.
 
-For production environments, use Docker secrets instead of mounting config.yaml:
+## Container controls
 
-```yaml
-# docker-compose.prod.yml
-version: '3.8'
-services:
-  dns-updater:
-    build: .
-    secrets:
-      - cloudflare_zone_id
-      - cloudflare_api_token
-    environment:
-      - ZONE_ID_FILE=/run/secrets/cloudflare_zone_id
-      - API_TOKEN_FILE=/run/secrets/cloudflare_api_token
+The supplied Compose definition:
 
-secrets:
-  cloudflare_zone_id:
-    external: true
-  cloudflare_api_token:
-    external: true
-```
+- runs as UID/GID `10001`, not root;
+- uses a read-only root filesystem and a small temporary filesystem;
+- drops all Linux capabilities and enables `no-new-privileges`;
+- publishes no ports;
+- rotates Docker logs; and
+- limits CPU and memory.
 
-### 6. Environment Variables (Alternative)
+Logs contain record names and public IP addresses, but never the authorization
+header or token. Treat them as infrastructure metadata.
 
-You can also use environment variables for sensitive data:
+## Rotation and incident response
 
-```bash
-export CLOUDFLARE_ZONE_ID="your_zone_id"
-export CLOUDFLARE_API_TOKEN="your_token"
-```
+If a token might be exposed:
 
-Then modify `config.yaml` to reference them:
-```yaml
-cloudflare:
-  zone_id: "${CLOUDFLARE_ZONE_ID}"
-  api_token: "${CLOUDFLARE_API_TOKEN}"
-```
+1. Revoke it immediately in Cloudflare under **API Tokens**.
+2. Review Cloudflare audit logs and DNS records for unauthorized activity.
+3. Create a new zone-scoped DNS Edit token.
+4. Replace `secrets/cloudflare_api_token` and restore mode `600`.
+5. Restart and verify:
 
-## Reporting Security Issues
+   ```bash
+   docker compose restart
+   docker compose logs --tail=100
+   docker compose ps
+   ```
 
-If you discover a security vulnerability, please email the maintainers directly instead of opening a public issue.
+If a real token was ever committed, removing it from the latest file is not
+enough: revoke it first, then separately purge it from Git history before making
+the repository public or sharing clones.
 
-## Security Checklist
+## Reporting vulnerabilities
 
-Before deploying:
-- [ ] `config.yaml` is in `.gitignore`
-- [ ] Using restricted CloudFlare API token (not Global API Key)
-- [ ] File permissions set to 600 on `config.yaml`
-- [ ] Logs directory has appropriate permissions
-- [ ] API token has expiration date set
-- [ ] Token is restricted to specific zones only
-- [ ] No credentials in environment variables on shared systems
-- [ ] Docker secrets used for production deployments
-
-## What Gets Logged
-
-The application logs:
-- Timestamps of DNS updates
-- Resolved IP addresses
-- CloudFlare API responses (without credentials)
-- Error messages
-
-The application does NOT log:
-- API tokens
-- Full API requests with headers
-- Passwords or secrets
-
-## Revoking Compromised Tokens
-
-If your API token is compromised:
-
-1. **Immediately revoke** the token in CloudFlare Dashboard
-2. Generate a new token with restricted permissions
-3. Update your `config.yaml` with the new token
-4. Restart the application/container
-5. Review CloudFlare audit logs for unauthorized changes
-
-## Additional Resources
-
-- [CloudFlare API Token Best Practices](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)
-- [Docker Secrets Documentation](https://docs.docker.com/engine/swarm/secrets/)
+Report security problems privately to the repository owner rather than opening
+a public issue containing exploit details or credentials.

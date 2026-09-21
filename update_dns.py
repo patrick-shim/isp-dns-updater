@@ -9,6 +9,7 @@ import subprocess
 import logging
 import time
 import os
+import ipaddress
 import yaml
 import requests
 from pathlib import Path
@@ -43,7 +44,8 @@ class Config:
             
             if not config:
                 raise ValueError("Configuration file is empty")
-            
+
+            self._load_cloudflare_credentials(config)
             self._validate_config(config)
             return config
             
@@ -51,7 +53,53 @@ class Config:
             raise ValueError(f"Invalid YAML in configuration file: {e}")
         except Exception as e:
             raise ValueError(f"Error loading configuration: {e}")
-    
+
+    @staticmethod
+    def _read_secret_file(path: str, field_name: str) -> str:
+        """Read a secret value from a Docker secret or another local file."""
+        try:
+            value = Path(path).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise ValueError(
+                f"Could not read Cloudflare {field_name} file '{path}': {exc}"
+            ) from exc
+
+        if not value:
+            raise ValueError(f"Cloudflare {field_name} file '{path}' is empty")
+        return value
+
+    def _load_cloudflare_credentials(self, config: Dict) -> None:
+        """Resolve Cloudflare credentials without requiring them in YAML."""
+        cloudflare = config.setdefault('cloudflare', {})
+        credential_sources = {
+            'zone_id': 'CLOUDFLARE_ZONE_ID',
+            'api_token': 'CLOUDFLARE_API_TOKEN',
+        }
+
+        for field_name, environment_name in credential_sources.items():
+            environment_file = os.getenv(f"{environment_name}_FILE")
+            environment_value = os.getenv(environment_name)
+            configured_file = cloudflare.get(f"{field_name}_file")
+            configured_value = cloudflare.get(field_name)
+
+            if environment_file:
+                value = self._read_secret_file(environment_file, field_name)
+            elif environment_value:
+                value = environment_value.strip()
+            elif configured_file:
+                value = self._read_secret_file(configured_file, field_name)
+            elif configured_value:
+                value = str(configured_value).strip()
+            else:
+                raise ValueError(
+                    f"Missing Cloudflare {field_name}. Configure "
+                    f"'{field_name}_file' or {environment_name}_FILE"
+                )
+
+            if not value:
+                raise ValueError(f"Cloudflare {field_name} cannot be empty")
+            cloudflare[field_name] = value
+
     def _validate_config(self, config: Dict) -> None:
         """Validate required configuration fields"""
         required_sections = ['cloudflare', 'dns', 'retry', 'timeouts', 'logging']
@@ -71,7 +119,11 @@ class Config:
             for field in fields:
                 if field not in config[section]:
                     raise ValueError(f"Missing required field '{field}' in section '{section}'")
-    
+
+        record_name = str(config['dns']['record_name'])
+        if 'CHANGE_ME' in record_name.upper():
+            raise ValueError("Replace dns.record_name with the Cloudflare record to manage")
+
     def get(self, section: str, key: str, default=None):
         """Get configuration value"""
         return self.config.get(section, {}).get(key, default)
@@ -153,7 +205,7 @@ class CloudFlareDNSUpdater:
             self.logger.info(f"Resolving IP for hostname: {hostname}")
             
             result = subprocess.run(
-                ["dig", "+short", hostname],
+                ["dig", "+short", "A", hostname],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -163,10 +215,14 @@ class CloudFlareDNSUpdater:
         
         try:
             result = _resolve()
-            ip = result.stdout.strip()
-            
+            answers = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+            ip = next(
+                (answer for answer in answers if self._is_ipv4_address(answer)),
+                None,
+            )
+
             if not ip:
-                self.logger.error(f"No IP returned for {hostname}")
+                self.logger.error(f"No IPv4 address returned for {hostname}")
                 return None
             
             if result.stderr:
@@ -189,7 +245,15 @@ class CloudFlareDNSUpdater:
         except Exception as e:
             self.logger.exception(f"Unexpected error resolving {hostname}: {e}")
             return None
-    
+
+    @staticmethod
+    def _is_ipv4_address(value: str) -> bool:
+        """Return whether a DNS answer is a valid IPv4 address."""
+        try:
+            return ipaddress.ip_address(value).version == 4
+        except ValueError:
+            return False
+
     def get_existing_records(self) -> List[dict]:
         """Get all existing A records for the domain with retry logic"""
         initial_delay = self.config.get('retry', 'initial_delay')
@@ -338,68 +402,74 @@ class CloudFlareDNSUpdater:
             raise
     
     def update_dns_records(self, ip1: str, ip2: str) -> bool:
-        """Update DNS records with two IPs with comprehensive error handling"""
+        """Reconcile the record with the desired IPs without an outage window."""
         self.logger.info("="*60)
         self.logger.info(f"Starting DNS update for {self.record_name}")
         self.logger.info(f"Target IPs: {ip1}, {ip2}")
         self.logger.info("="*60)
         
         try:
-            self.logger.info("Phase 1: Cleaning old records")
+            desired_ips = list(dict.fromkeys((ip1, ip2)))
             existing_records = self.get_existing_records()
-            
-            deleted_count = 0
-            failed_deletes = []
-            
+
+            present_ips = set()
+            stale_records = []
             for record in existing_records:
+                ip_content = record.get("content", "unknown")
+                if ip_content in desired_ips and ip_content not in present_ips:
+                    present_ips.add(ip_content)
+                    self.logger.info(f"Keeping current record for {ip_content}")
+                else:
+                    stale_records.append(record)
+
+            self.logger.info("Phase 1: Creating missing records")
+            failed_creates = []
+            for desired_ip in desired_ips:
+                if desired_ip in present_ips:
+                    continue
+                try:
+                    if self.create_record(desired_ip):
+                        present_ips.add(desired_ip)
+                    else:
+                        failed_creates.append(desired_ip)
+                except Exception as e:
+                    self.logger.error(f"Failed to create record for {desired_ip}: {e}")
+                    failed_creates.append(desired_ip)
+
+            if failed_creates:
+                self.logger.error(
+                    "Not removing stale records because replacement creation failed: "
+                    f"{failed_creates}"
+                )
+                return False
+
+            self.logger.info("Phase 2: Removing stale or duplicate records")
+            failed_deletes = []
+            for record in stale_records:
                 record_id = record.get("id")
                 ip_content = record.get("content", "unknown")
-                
                 if record_id:
                     try:
-                        if self.delete_record(record_id, ip_content):
-                            deleted_count += 1
+                        if not self.delete_record(record_id, ip_content):
+                            failed_deletes.append(record_id)
                     except Exception as e:
                         self.logger.error(f"Failed to delete record {record_id}: {e}")
                         failed_deletes.append(record_id)
-            
+
             if failed_deletes:
-                self.logger.warning(f"Failed to delete {len(failed_deletes)} record(s): {failed_deletes}")
-            else:
-                self.logger.info(f"Successfully deleted {deleted_count} old record(s)")
-            
-            self.logger.info("Phase 2: Creating new records")
-            success1 = False
-            success2 = False
-            
-            try:
-                self.logger.info(f"Creating record for IP1: {ip1}")
-                success1 = self.create_record(ip1)
-            except Exception as e:
-                self.logger.error(f"Failed to create record for {ip1}: {e}")
-            
-            try:
-                self.logger.info(f"Creating record for IP2: {ip2}")
-                success2 = self.create_record(ip2)
-            except Exception as e:
-                self.logger.error(f"Failed to create record for {ip2}: {e}")
-            
-            if success1 and success2:
-                self.logger.info("="*60)
-                self.logger.info(f"✓ SUCCESS: {self.record_name} now points to {ip1} and {ip2}")
-                self.logger.info("="*60)
-                return True
-            elif success1 or success2:
-                self.logger.warning("="*60)
-                self.logger.warning(f"⚠ PARTIAL SUCCESS: Only {'IP1' if success1 else 'IP2'} was updated")
-                self.logger.warning("="*60)
+                self.logger.warning(
+                    f"Failed to delete {len(failed_deletes)} stale record(s): "
+                    f"{failed_deletes}"
+                )
                 return False
-            else:
-                self.logger.error("="*60)
-                self.logger.error("✗ FAILURE: No records were created successfully")
-                self.logger.error("="*60)
-                return False
-                
+
+            self.logger.info("="*60)
+            self.logger.info(
+                f"SUCCESS: {self.record_name} points to {', '.join(desired_ips)}"
+            )
+            self.logger.info("="*60)
+            return True
+
         except Exception as e:
             self.logger.exception(f"Critical error during DNS update: {e}")
             return False

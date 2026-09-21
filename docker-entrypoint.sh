@@ -1,18 +1,33 @@
-#!/bin/bash
-set -e
+#!/bin/sh
+set -u
 
-echo "Starting CloudFlare DNS Updater (cron mode)"
-echo "Cron schedule: Every 1 minute"
-echo "Log files:"
-echo "  - Application: /var/log/dns-updater.log"
-echo "  - Cron: /var/log/cron.log"
-echo ""
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+fi
 
-# Run once immediately on startup
-echo "Running initial DNS update..."
-cd /app && python update_dns.py
+interval="${DNS_UPDATER_INTERVAL_SECONDS:-60}"
+case "$interval" in
+    ''|*[!0-9]*)
+        echo "DNS_UPDATER_INTERVAL_SECONDS must be a positive integer" >&2
+        exit 2
+        ;;
+esac
 
-# Start cron in foreground
-echo ""
-echo "Starting cron daemon..."
-cron && tail -f /var/log/cron.log /var/log/dns-updater.log
+if [ "$interval" -lt 1 ]; then
+    echo "DNS_UPDATER_INTERVAL_SECONDS must be at least 1" >&2
+    exit 2
+fi
+
+trap 'exit 0' INT TERM
+
+echo "Starting Cloudflare DNS Updater (interval: ${interval}s)"
+while true; do
+    if python /app/update_dns.py; then
+        touch /tmp/dns-updater.last-success
+    else
+        echo "DNS update failed; retrying in ${interval}s" >&2
+    fi
+
+    sleep "$interval" &
+    wait $!
+done

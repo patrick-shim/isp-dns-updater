@@ -1,36 +1,45 @@
-version: '3.8'
-
 services:
   dns-updater:
-    build: .
-    container_name: cloudflare-dns-updater
+    build:
+      context: .
+    image: isp-dns-updater:local
     restart: unless-stopped
+    init: true
     volumes:
-      # Mount config file (edit this on host)
       - ./config.yaml:/app/config.yaml:ro
-      
-      # Mount logs to host for persistence
-      - ./logs:/var/log
     environment:
-      # Optional: Override config file location
-      # - DNS_UPDATER_CONFIG=/app/config.yaml
-      
-      # Set timezone (optional)
-      - TZ=Asia/Seoul
-    
-    # Log rotation (keeps ~30 days of logs, max 1GB total)
+      DNS_UPDATER_CONFIG: /app/config.yaml
+      DNS_UPDATER_INTERVAL_SECONDS: "${DNS_UPDATER_INTERVAL_SECONDS:-60}"
+      TZ: "${TZ:-Asia/Seoul}"
+    secrets:
+      - cloudflare_zone_id
+      - cloudflare_api_token
+    read_only: true
+    tmpfs:
+      - /tmp:size=1m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,time; p='/tmp/dns-updater.last-success'; raise SystemExit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 300 else 1)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
     logging:
       driver: "json-file"
       options:
-        max-size: "100m"
-        max-file: "10"
-    
-    # Resource limits (optional)
+        max-size: "10m"
+        max-file: "5"
     deploy:
       resources:
         limits:
-          cpus: '0.5'
-          memory: 256M
-        reservations:
-          cpus: '0.1'
-          memory: 64M
+          cpus: "0.25"
+          memory: 128M
+
+secrets:
+  cloudflare_zone_id:
+    file: ./secrets/cloudflare_zone_id
+  cloudflare_api_token:
+    file: ./secrets/cloudflare_api_token

@@ -18,13 +18,9 @@ jobs:
       uses: docker/setup-buildx-action@v3
     
     - name: Build Docker image
-      run: docker-compose build
-    
-    - name: Test Docker image
+      run: docker build --tag isp-dns-updater:test .
+
+    - name: Test image imports
       run: |
-        # Create a test config
-        cp config.example.yaml config.yaml
-        # Start container (will fail without real credentials, but tests build)
-        docker-compose up -d || true
-        # Check if container was created
-        docker-compose ps
+        docker run --rm --entrypoint python isp-dns-updater:test \
+          -c "import requests, yaml; import update_dns"

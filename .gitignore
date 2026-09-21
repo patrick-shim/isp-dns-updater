@@ -5,6 +5,8 @@ env/
 
 # Configuration (contains secrets)
 config.yaml
+secrets/
+.env
 
 # Python
 __pycache__/

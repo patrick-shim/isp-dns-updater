@@ -1,23 +1,21 @@
-# CloudFlare DNS Updater Configuration Example
-# Copy this file to config.yaml and update with your values
+# Cloudflare DNS Updater configuration.
+# Copy this file to config.yaml and set dns.record_name.
+# Credential values belong in ./secrets, not in this file.
 
 cloudflare:
-  # Your CloudFlare Zone ID (found in CloudFlare dashboard)
-  zone_id: "your_zone_id_here"
-  
-  # Your CloudFlare API Token (with DNS edit permissions)
-  api_token: "your_api_token_here"
+  zone_id_file: "/run/secrets/cloudflare_zone_id"
+  api_token_file: "/run/secrets/cloudflare_api_token"
   
   # CloudFlare API base URL (usually no need to change)
   api_base_url: "https://api.cloudflare.com/client/v4"
 
 dns:
   # The DNS record name to update
-  record_name: "unifi.example.com"
+  record_name: "CHANGE_ME.neostation.co.kr"
   
   # Hostnames to resolve for ISP IPs
-  isp1_hostname: "isp1.example.com"
-  isp2_hostname: "isp2.example.com"
+  isp1_hostname: "isp1.neostation.co.kr"
+  isp2_hostname: "isp2.neostation.co.kr"
   
   # DNS record TTL in seconds
   ttl: 120
@@ -49,8 +47,8 @@ logging:
   # Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL
   level: "INFO"
   
-  # Path to log file (set to null or empty string to disable file logging)
-  log_file: "/var/log/dns-updater.log"
+  # Docker captures stdout/stderr and rotates it per docker-compose.yml.
+  log_file: null
   
   # Log message format
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

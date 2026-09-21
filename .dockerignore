@@ -14,6 +14,11 @@ __pycache__/
 *.log
 logs/
 
+# Runtime configuration and credentials
+config.yaml
+secrets/
+.env
+
 # IDE
 .vscode/
 .idea/

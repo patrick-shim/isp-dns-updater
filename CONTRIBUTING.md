@@ -58,14 +58,14 @@ python update_dns.py
 
 ```bash
 # Build and test
-docker-compose build
-docker-compose up
+docker compose build
+docker compose up
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Shell access
-docker-compose exec dns-updater bash
+docker compose exec dns-updater sh
 ```
 
 ## Code Style
@@ -79,7 +79,8 @@ docker-compose exec dns-updater bash
 ## Testing
 
 Before submitting a PR:
-- Test with your CloudFlare account
+- Run `python -m unittest discover -s tests -v`
+- Test with your Cloudflare account only when an integration test is necessary
 - Test Docker build and deployment
 - Verify logging output
 - Test error handling scenarios
