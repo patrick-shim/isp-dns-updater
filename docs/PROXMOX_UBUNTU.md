@@ -101,8 +101,13 @@ in separate local files, one value per file:
 install -m 700 -d secrets
 nano secrets/cloudflare_zone_id
 nano secrets/cloudflare_api_token
-chmod 600 secrets/cloudflare_zone_id secrets/cloudflare_api_token
+sudo chgrp 10001 secrets/cloudflare_zone_id secrets/cloudflare_api_token
+chmod 640 secrets/cloudflare_zone_id secrets/cloudflare_api_token
 ```
+
+GID `10001` matches the unprivileged group inside the container. The VM user
+remains the file owner, the application can read the files, and other host users
+cannot.
 
 Do not place credentials in `config.yaml`, `docker-compose.yml`, `.env`, a shell
 script, or a Git commit. Confirm Git ignores the local material:

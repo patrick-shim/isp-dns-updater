@@ -48,11 +48,15 @@ Create the two local secret files:
 chmod 700 secrets
 nano secrets/cloudflare_zone_id
 nano secrets/cloudflare_api_token
-chmod 600 secrets/cloudflare_zone_id secrets/cloudflare_api_token
+sudo chgrp 10001 secrets/cloudflare_zone_id secrets/cloudflare_api_token
+chmod 640 secrets/cloudflare_zone_id secrets/cloudflare_api_token
 ```
 
-Each file must contain only its value. A final newline is allowed. Then validate,
-build, and perform one real reconciliation before enabling the service:
+GID `10001` is the container's unprivileged `dns-updater` group. This keeps the
+files writable by your VM user and readable by the application without making
+them world-readable. Each file must contain only its value; a final newline is
+allowed. Then validate, build, and perform one real reconciliation before
+enabling the service:
 
 ```bash
 make config

@@ -22,8 +22,10 @@ protection, backups with suitable access controls, and trusted VM admins.
 
 - Use a scoped Cloudflare API token, never the Global API Key.
 - Grant only **Zone → DNS → Edit** and only for the intended zone.
-- Store only one value in each secret file and set the directory to mode `700`
-  and files to `600`.
+- Store only one value in each secret file, set the directory to mode `700`, and
+  set the files to owner `pashim`, group ID `10001`, mode `640`. GID `10001`
+  matches the unprivileged container group without granting access to other
+  host users.
 - Keep `config.yaml`, `.env`, and `secrets/` ignored. Check before every push:
 
   ```bash
@@ -62,7 +64,8 @@ If a token might be exposed:
 1. Revoke it immediately in Cloudflare under **API Tokens**.
 2. Review Cloudflare audit logs and DNS records for unauthorized activity.
 3. Create a new zone-scoped DNS Edit token.
-4. Replace `secrets/cloudflare_api_token` and restore mode `600`.
+4. Replace `secrets/cloudflare_api_token`, set group ID `10001`, and restore
+   mode `640`.
 5. Restart and verify:
 
    ```bash
